@@ -35,6 +35,7 @@
 Dify Workflow · Tavily Search API 
 ## 效果截图
 <img width="2574" height="1162" alt="image" src="https://github.com/user-attachments/assets/4c683b11-cbba-4fc5-abec-1a1ebc194dc7" />
-### 工作流架构
+
+## 工作流架构
 <img width="12840" height="1848" alt="竞品分析-whole-workflow" src="https://github.com/user-attachments/assets/bf9a92df-f009-435c-be9a-d30e5b2f3d0b" />
 
