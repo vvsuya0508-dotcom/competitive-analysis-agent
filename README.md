@@ -42,4 +42,18 @@ Dify Workflow · Tavily Search API
 <img width="12840" height="1848" alt="竞品分析-whole-workflow" src="https://github.com/user-attachments/assets/bf9a92df-f009-435c-be9a-d30e5b2f3d0b" />
 <img width="16384" height="1554" alt="327b26044c038aa6e7852d9f1b7d3396" src="https://github.com/user-attachments/assets/53d23a39-a84f-43c3-b3e9-05518897a71b" />
 
+## 使用方法
 
+**方式一：直接体验**
+点击上方 Demo 链接，输入产品名称即可
+
+**方式二：导入 Dify**
+1. 下载 chatflow/chatflow.yml
+2. Dify 工作室 → 导入 DSL 文件
+3. 配置 Tavily API Key 和 LLM
+4. 发布运行
+
+**方式三：本地部署网页**
+1. 下载 web/index.html
+2. 填入你的 Dify API Key
+3. 浏览器直接打开
