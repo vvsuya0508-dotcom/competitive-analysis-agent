@@ -1032,7 +1032,6 @@
     <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
   </div>
   <div class="sidebar-actions">
-    <button class="btn btn-secondary" onclick="exportCurrentChat()" title="导出当前对话为 Markdown">📥 导出</button>
     <button class="btn btn-secondary" onclick="clearHistory()">🗑️ 清空</button>
   </div>
   <div class="sidebar-list" id="sidebar-list">
@@ -1065,6 +1064,8 @@
   let conversationId = '';
   let isLoading = false;
   let abortController = null;
+  // 当前会话消息的原始内容（用于持久化保存）
+  let currentMessages = [];
 
   // ====== DOM 引用 ======
   const $ = id => document.getElementById(id);
@@ -1166,8 +1167,26 @@
     const h = history[index];
     if (h) {
       conversationId = h.conversationId;
-      $('input').value = h.product;
-      sendMessage();
+
+      // 加载该会话的消息
+      const messages = getConversationMessages(conversationId);
+      currentMessages = messages.slice(); // 深拷贝
+
+      // 清空聊天区
+      const chat = $('chat');
+      chat.innerHTML = '';
+
+      if (messages.length === 0) {
+        // 没有缓存的消息（旧记录或未保存），显示欢迎页并填入产品名
+        showWelcome();
+        $('input').value = h.product;
+      } else {
+        // 批量渲染保存的消息
+        messages.forEach(msg => {
+          addMessage(msg.role, msg.content, true);
+        });
+      }
+
       toggleSidebar();
     }
   }
@@ -1175,31 +1194,23 @@
   function clearHistory() {
     if (!confirm('确定清空所有历史记录？')) return;
     localStorage.removeItem('dify_history');
+    localStorage.removeItem('dify_conversations');
     renderHistory();
   }
 
-  function exportCurrentChat() {
-    const msgs = document.querySelectorAll('#chat .msg');
-    if (!msgs.length) {
-      alert('当前没有可导出的对话');
-      return;
-    }
-    let md = `# 竞品分析报告\n\n`;
-    md += `> 导出时间：${new Date().toLocaleString('zh-CN')}\n\n---\n\n`;
-    msgs.forEach(msg => {
-      const role = msg.classList.contains('user') ? '**用户**' : '**分析助手**';
-      const text = msg.querySelector('.bubble')?.textContent?.trim() || '';
-      if (text) {
-        md += `### ${role}\n\n${text}\n\n`;
-      }
-    });
-    const blob = new Blob([md], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `竞品分析报告_${new Date().toISOString().slice(0,10)}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+  // ====== 消息持久化：保存/加载历史对话内容 ======
+  function saveConversationMessages() {
+    if (!conversationId || currentMessages.length === 0) return;
+    const conversations = JSON.parse(localStorage.getItem('dify_conversations') || '{}');
+    conversations[conversationId] = { messages: currentMessages };
+    localStorage.setItem('dify_conversations', JSON.stringify(conversations));
+  }
+
+  function getConversationMessages(convId) {
+    try {
+      const conversations = JSON.parse(localStorage.getItem('dify_conversations') || '{}');
+      return conversations[convId]?.messages || [];
+    } catch { return []; }
   }
 
   // ====== 工具函数 ======
@@ -1475,17 +1486,8 @@
   }
 
   // ====== 新建会话（返回主页）======
-  function newChat() {
-    if (isLoading) {
-      // 如果正在分析，先中断
-      stopStream();
-    }
-    // 清空聊天区（保留欢迎页）
+  function showWelcome() {
     const chat = $('chat');
-    chat.innerHTML = '';
-    // 重置会话 ID
-    conversationId = '';
-    // 重新插入欢迎页
     chat.innerHTML = `
       <div class="welcome" id="welcome">
         <div class="icon">🤖</div>
@@ -1522,6 +1524,18 @@
         </div>
       </div>
     `;
+  }
+
+  function newChat() {
+    if (isLoading) {
+      // 如果正在分析，先中断
+      stopStream();
+    }
+    // 重置会话 ID 和消息列表
+    conversationId = '';
+    currentMessages = [];
+    // 显示欢迎页
+    showWelcome();
     setStatus('ready');
   }
 
@@ -1546,6 +1560,7 @@
     input.style.height = 'auto';
 
     addMessage('user', query);
+    currentMessages.push({ role: 'user', content: query });
     addStageIndicator();
 
     abortController = new AbortController();
@@ -1603,7 +1618,7 @@
           if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.slice(6));
-            if (data.event === 'message' && data.answer) {
+            if ((data.event === 'message' || data.event === 'agent_message') && data.answer) {
               fullText += data.answer;
 
               // 分段渲染：超过 2000 字符后增量追加
@@ -1623,6 +1638,15 @@
             if (data.conversation_id) {
               conversationId = data.conversation_id;
             }
+            // message_end 事件中也携带 conversation_id
+            if (data.event === 'message_end') {
+              if (data.id && !conversationId) {
+                conversationId = data.id;
+              }
+              if (data.conversation_id) {
+                conversationId = data.conversation_id;
+              }
+            }
           } catch {}
         }
       }
@@ -1636,13 +1660,21 @@
         scrollToBottom();
       }
 
-      // 保存到历史
+      // 保存 bot 回复到消息列表
+      currentMessages.push({ role: 'bot', content: fullText });
+      // 保存到历史（API 未返回 conversationId 时用本地临时 ID）
       if (conversationId) {
         saveToHistory(query, conversationId);
+      } else {
+        conversationId = 'local_' + Date.now();
+        saveToHistory(query, conversationId);
       }
+      // 持久化当前会话的消息内容
+      saveConversationMessages();
 
     } catch (err) {
       removeStageIndicator();
+      console.warn('[Dify Chat] 请求异常:', err.name, err.message);
 
       if (err.name === 'AbortError') {
         // 手动中断：如果气泡存在且有内容，添加继续按钮
@@ -1791,7 +1823,7 @@
             if (!line.startsWith('data: ')) continue;
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.event === 'message' && data.answer) {
+              if ((data.event === 'message' || data.event === 'agent_message') && data.answer) {
                 fullText += data.answer;
                 if (fullText.length - lastRenderedLength > 2000) {
                   bubble.innerHTML = renderMarkdown(fullText);
@@ -1807,6 +1839,15 @@
               if (data.conversation_id) {
                 conversationId = data.conversation_id;
               }
+              // message_end 事件中也携带 conversation_id
+              if (data.event === 'message_end') {
+                if (data.id && !conversationId) {
+                  conversationId = data.id;
+                }
+                if (data.conversation_id) {
+                  conversationId = data.conversation_id;
+                }
+              }
             } catch {}
           }
         }
@@ -1821,9 +1862,21 @@
 
         if (conversationId) {
           saveToHistory(originalQuery, conversationId);
+        } else {
+          conversationId = 'local_' + Date.now();
+          saveToHistory(originalQuery, conversationId);
         }
+        // 更新 currentMessages 中的 bot 回复
+        const lastBotIdx = currentMessages.map(m => m.role).lastIndexOf('bot');
+        if (lastBotIdx !== -1) {
+          currentMessages[lastBotIdx].content = fullText;
+        } else {
+          currentMessages.push({ role: 'bot', content: fullText });
+        }
+        saveConversationMessages();
 
       } catch (err) {
+        console.warn('[Dify Chat] continueAnalysis 异常:', err.name, err.message);
         if (err.name !== 'AbortError') {
           addContinueButtons(bubble, originalQuery);
         }
