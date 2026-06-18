@@ -5,7 +5,7 @@
 
 🔗 **在线体验workflow**：https://udify.app/workflow/HMXQClIozD3KfseH 
 （输入"飞书"或任意产品名即可体验）
-🔗 **在线体验chatflow**：https://vvsuya0508-dotcom.github.io/competitive-analysis/
+🔗 **在线体验chatflow**：https://vvsuya0508-dotcom.github.io/competitive-analysis-agent/  
 ## 项目背景
 针对竞品调研过程中信息分散、人工整理耗时的痛点，系统拆解竞品分析全流程，抽象出竞品发现、信息采集、产品分析、定价分析、市场分析、策略建议六大核心任务，完成 Agent 产品方案设计与 MVP 规划，验证 LLM 在复杂调研场景中的应用价值。
 基于 Dify 完成从业务洞察到 MVP 的全栈落地。
