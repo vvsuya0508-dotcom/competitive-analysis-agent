@@ -154,11 +154,33 @@
       background: rgba(124,92,191,0.1);
       color: var(--accent);
     }
-    .btn-new-chat {
+    .btn-export {
       background: transparent;
       border: 1.5px solid var(--border);
       border-radius: var(--radius-sm);
       padding: 6px 14px;
+      font-size: var(--font-sm);
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-family: inherit;
+      transition: all var(--duration-fast) var(--ease-out);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+    .btn-export:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(124,92,191,0.06);
+    }
+    .btn-export:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .btn-new-chat {
+      background: transparent;
       font-size: var(--font-sm);
       font-weight: 600;
       cursor: pointer;
@@ -307,6 +329,63 @@
       color: var(--text);
     }
     .bubble tr:nth-child(even) td { background: rgba(46, 139, 114, 0.04); }
+
+    /* Markdown 扩展样式 */
+    .bubble pre {
+      background: #1e1e2e;
+      color: #cdd6f4;
+      padding: 16px 18px;
+      border-radius: var(--radius-sm);
+      overflow-x: auto;
+      margin: 12px 0;
+      font-size: 13px;
+      line-height: 1.6;
+      border: 1px solid var(--border);
+    }
+    .bubble pre code {
+      background: none;
+      padding: 0;
+      color: inherit;
+      font-size: inherit;
+      border-radius: 0;
+    }
+    .bubble blockquote {
+      border-left: 3px solid var(--accent);
+      background: rgba(124,92,191,0.06);
+      padding: 10px 16px;
+      margin: 10px 0;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      color: var(--text-secondary);
+    }
+    .bubble blockquote p:last-child { margin-bottom: 0; }
+    .bubble ol {
+      padding-left: 20px;
+      margin-bottom: 10px;
+    }
+    .bubble ol li { margin-bottom: 4px; }
+    .bubble del {
+      text-decoration: line-through;
+      color: var(--text-muted);
+    }
+    .bubble a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 500;
+      border-bottom: 1px solid transparent;
+      transition: border-color var(--duration-fast) var(--ease-out);
+    }
+    .bubble a:hover {
+      border-bottom-color: var(--accent);
+    }
+    .bubble img {
+      max-width: 100%;
+      border-radius: var(--radius-sm);
+      margin: 8px 0;
+    }
+    .bubble input[type="checkbox"] {
+      margin: 0 4px 0 0;
+      pointer-events: none;
+    }
 
     /* 步骤提示卡片 */
     .step-card {
@@ -884,6 +963,7 @@
       .modal { padding: 20px; }
     }
   </style>
+<script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.0/dist/html-docx.js"></script>
 </head>
 <body>
 
@@ -902,6 +982,12 @@
   <div class="header-actions">
     <button class="btn-new-chat" onclick="newChat()" title="开始新会话">
       ✚ 新会话
+    </button>
+    <button id="export-word-btn" class="btn-export" onclick="exportWord()" title="导出 Word 报告" disabled>
+      📄 Word
+    </button>
+    <button id="export-md-btn" class="btn-export" onclick="exportMarkdown()" title="导出 Markdown 报告" disabled>
+      📝 Markdown
     </button>
     <button id="settings-btn" class="btn-icon header-btn" onclick="openSettings()" title="设置">
       <svg viewBox="0 0 24 24" width="18" height="18"><path d="M19.14 12.94a7.07 7.07 0 0 0 .06-.94c0-.32-.02-.64-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.3-.07.62-.07.94s.03.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z" fill="currentColor"/></svg>
@@ -1458,31 +1544,325 @@
     currentStageIndex = -1;
   }
 
-  // ====== 简单 Markdown 渲染 ======
+  // ====== Markdown 全格式渲染（GFM 逐行解析器）======
   function renderMarkdown(text) {
+    // 1) HTML 转义（代码块内容不做额外转义，由内部处理）
+    let escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    const lines = escaped.split('\n');
+    const out = [];
+    let inCodeBlock = false;
+    let codeLang = '';
+    let codeLines = [];
+    let inBlockquote = false;
+    let quoteLines = [];
+    let listStack = []; // [{ type: 'ul'|'ol', items: [] }]
+
+    function flushCodeBlock() {
+      if (codeLines.length === 0) return;
+      const langAttr = codeLang ? ` class="language-${escapeHtml(codeLang)}"` : '';
+      out.push(`<pre><code${langAttr}>${codeLines.join('\n')}</code></pre>`);
+      codeLines = [];
+      codeLang = '';
+    }
+
+    function flushBlockquote() {
+      if (quoteLines.length === 0) return;
+      const inner = quoteLines.map(l => l.replace(/^&gt;\s?/, '')).join('\n');
+      out.push(`<blockquote>${renderInline(inner)}</blockquote>`);
+      quoteLines = [];
+    }
+
+    function flushList() {
+      for (let i = listStack.length - 1; i >= 0; i--) {
+        const lst = listStack[i];
+        const tag = lst.type;
+        out.push(`<${tag}>${lst.items.join('')}</${tag}>`);
+      }
+      listStack = [];
+    }
+
+    // 2) 逐行解析块级元素
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i];
+
+      // --- 围栏代码块 ---
+      if (/^```/.test(line)) {
+        if (inCodeBlock) {
+          flushCodeBlock();
+          inCodeBlock = false;
+          continue;
+        }
+        // 必须在块外，关闭所有挂起的块
+        flushBlockquote();
+        flushList();
+        inCodeBlock = true;
+        codeLang = line.slice(3).trim();
+        continue;
+      }
+      if (inCodeBlock) {
+        codeLines.push(line);
+        continue;
+      }
+
+      // --- 空行 ---
+      if (/^\s*$/.test(line)) {
+        flushBlockquote();
+        flushList();
+        out.push('');
+        continue;
+      }
+
+      // --- 引用块 ---
+      if (/^&gt;/.test(line)) {
+        flushList();
+        quoteLines.push(line);
+        inBlockquote = true;
+        continue;
+      } else if (inBlockquote) {
+        flushBlockquote();
+      }
+
+      // --- 水平线 ---
+      if (/^-{3,}$/.test(line) || /^\*{3,}$/.test(line)) {
+        flushList();
+        out.push('<hr>');
+        continue;
+      }
+
+      // --- 标题 ---
+      const hMatch = line.match(/^(#{1,6})\s+(.+)$/);
+      if (hMatch) {
+        flushList();
+        const level = hMatch[1].length;
+        out.push(`<h${level}>${renderInline(hMatch[2])}</h${level}>`);
+        continue;
+      }
+
+      // --- 表格 ---
+      if (/^\|.+\|$/.test(line)) {
+        const nextLine = lines[i + 1];
+        if (nextLine && /^\|[-| :]+\|$/.test(nextLine)) {
+          flushList();
+          // 解析表头
+          const headers = line.split('|').filter(s => s.trim());
+          const ths = headers.map(h => `<th>${renderInline(h.trim())}</th>`).join('');
+          // 跳过分隔行
+          i++;
+          const rows = [];
+          while (i + 1 < lines.length && /^\|.+\|$/.test(lines[i + 1])) {
+            i++;
+            const cells = lines[i].split('|').filter(s => s.trim());
+            const tds = cells.map(c => `<td>${renderInline(c.trim())}</td>`).join('');
+            rows.push(`<tr>${tds}</tr>`);
+          }
+          out.push(`<table><thead><tr>${ths}</tr></thead><tbody>${rows.join('')}</tbody></table>`);
+          continue;
+        }
+      }
+
+      // --- 有序列表 ---
+      const olMatch = line.match(/^(\s*)\d+\.\s+(.+)$/);
+      if (olMatch) {
+        const indent = olMatch[1].length;
+        const content = olMatch[2];
+        // 找到对应的嵌套层级
+        while (listStack.length > 0 && listStack.length > indent / 2 + 1) {
+          const lst = listStack.pop();
+          out.push(`<${lst.type}>${lst.items.join('')}</${lst.type}>`);
+        }
+        if (listStack.length === 0 || listStack[listStack.length - 1].type !== 'ol') {
+          listStack.push({ type: 'ol', items: [] });
+        }
+        listStack[listStack.length - 1].items.push(`<li>${renderInline(content)}</li>`);
+        continue;
+      }
+
+      // --- 无序列表 ---
+      const ulMatch = line.match(/^(\s*)[-*+]\s+(.+)$/);
+      if (ulMatch) {
+        const indent = ulMatch[1].length;
+        let content = ulMatch[2];
+        // 任务列表
+        const taskMatch = content.match(/^\[([ x])\]\s+(.+)$/);
+        if (taskMatch) {
+          const checked = taskMatch[1] === 'x' ? ' checked' : '';
+          content = `<input type="checkbox" disabled${checked}> ${renderInline(taskMatch[2])}`;
+        } else {
+          content = renderInline(content);
+        }
+        while (listStack.length > 0 && listStack.length > indent / 2 + 1) {
+          const lst = listStack.pop();
+          out.push(`<${lst.type}>${lst.items.join('')}</${lst.type}>`);
+        }
+        if (listStack.length === 0 || listStack[listStack.length - 1].type !== 'ul') {
+          listStack.push({ type: 'ul', items: [] });
+        }
+        listStack[listStack.length - 1].items.push(`<li>${content}</li>`);
+        continue;
+      }
+
+      // --- 普通段落（累计）---
+      flushList();
+      // 收集连续的段落行
+      let paraLines = [line];
+      while (i + 1 < lines.length) {
+        const next = lines[i + 1];
+        if (/^\s*$/.test(next) || /^#/.test(next) || /^```/.test(next) || /^\|.+\|$/.test(next) || /^>/.test(next) || /^-{3,}$/.test(next) || /^\d+\.\s/.test(next) || /^[-*+]\s/.test(next)) break;
+        i++;
+        paraLines.push(lines[i]);
+      }
+      const paraText = paraLines.join(' ');
+      if (paraText.trim()) {
+        out.push(`<p>${renderInline(paraText)}</p>`);
+      }
+    }
+
+    // 3) 清理尾部未闭合的块
+    flushCodeBlock();
+    flushBlockquote();
+    flushList();
+
+    return out.join('\n');
+  }
+
+  // 行内 Markdown 渲染
+  function renderInline(text) {
     return text
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      // 表格
-      .replace(/\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)*)/g, (_, header, rows) => {
-        const ths = header.split('|').filter(s => s.trim()).map(s => `<th>${s.trim()}</th>`).join('');
-        const trs = rows.trim().split('\n').map(row => {
-          const tds = row.split('|').filter(s => s.trim()).map(s => `<td>${s.trim()}</td>`).join('');
-          return `<tr>${tds}</tr>`;
-        }).join('');
-        return `<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
-      })
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      // 图片（优先于链接）
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy">')
+      // 链接 [text](url)
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      // 自动链接
+      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
+      // 粗体
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      // 斜体
       .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      .replace(/`(.+?)`/g, '<code>$1</code>')
-      .replace(/^---$/gm, '<hr>')
-      .replace(/^- (.+)$/gm, '<li>$1</li>')
-      .replace(/(<li>.*<\/li>\n?)+/g, s => `<ul>${s}</ul>`)
-      .replace(/\n\n/g, '</p><p>')
-      .replace(/^(?!<[huptocd]|<\/[huptocd])(.+)$/gm, '$1')
-      .replace(/<p><\/p>/g, '');
+      // 删除线
+      .replace(/~~(.+?)~~/g, '<del>$1</del>')
+      // 行内代码
+      .replace(/`([^`]+)`/g, '<code>$1</code>');
+  }
+
+  // ====== 导出 Word 和 Markdown ======
+  // 从 bot 回复中提取最终的竞品分析报告
+  function getReportContent() {
+    const botMessages = currentMessages.filter(m => m.role === 'bot');
+    if (botMessages.length === 0) return '';
+    let content = botMessages[botMessages.length - 1].content;
+
+    // 从「一、战略定位」开始截取
+    const startMarker = '一、战略定位';
+    const startIdx = content.indexOf(startMarker);
+    if (startIdx !== -1) {
+      content = content.slice(startIdx);
+    }
+
+    // 截到「分析完成」标记之前结束（不包含该行）
+    const endMarkers = [
+      '✅ **分析完成！以下是完整竞品分析报告：',
+      '✅ **分析完成',
+      '分析完成！以下是完整竞品分析报告'
+    ];
+    for (const marker of endMarkers) {
+      const endIdx = content.indexOf(marker);
+      if (endIdx !== -1) {
+        content = content.slice(0, endIdx).trim();
+        break;
+      }
+    }
+
+    return content;
+  }
+
+  function getProductName() {
+    const firstUser = currentMessages.find(m => m.role === 'user');
+    return firstUser ? firstUser.content.trim() : '竞品分析报告';
+  }
+
+  function exportWord() {
+    const reportContent = getReportContent();
+    if (!reportContent) return;
+    const productName = getProductName();
+
+    const docHtml = `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>${escapeHtml(productName)} 竞品分析报告</title>
+<style>
+  body { font-family: -apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif; color: #1e1836; line-height: 1.75; max-width: 800px; margin: 0 auto; padding: 40px; }
+  h1 { font-size: 26px; color: #543a8f; border-bottom: 2px solid #7c5cbf; padding-bottom: 8px; }
+  h2 { font-size: 20px; color: #543a8f; border-bottom: 1px solid #d5cce8; padding-bottom: 6px; margin-top: 24px; }
+  h3 { font-size: 16px; color: #3d2e6b; margin-top: 20px; }
+  p { margin-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th { background: #e3def0; padding: 8px 12px; text-align: left; border: 1px solid #d5cce8; }
+  td { padding: 8px 12px; border: 1px solid #d5cce8; }
+  pre { background: #1e1e2e; color: #cdd6f4; padding: 14px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+  code { background: rgba(124,92,191,0.1); padding: 2px 6px; border-radius: 4px; font-size: 12px; color: #543a8f; }
+  pre code { background: none; color: inherit; padding: 0; }
+  blockquote { border-left: 3px solid #7c5cbf; background: #f4f1fb; padding: 8px 14px; margin: 10px 0; }
+  ul, ol { padding-left: 20px; margin-bottom: 10px; }
+  li { margin-bottom: 4px; }
+  hr { border: none; border-top: 1px solid #d5cce8; margin: 16px 0; }
+  a { color: #7c5cbf; text-decoration: none; }
+  img { max-width: 100%; }
+  del { color: #8a7db5; }
+</style></head>
+<body>
+<h1 style="text-align:center;border-bottom:3px solid #7c5cbf;padding-bottom:12px;">${escapeHtml(productName)} 竞品分析报告</h1>
+${renderMarkdown(reportContent)}
+<p style="margin-top:32px;color:#8a7db5;font-size:12px;text-align:center;border-top:1px solid #d5cce8;padding-top:12px;">由竞品分析 Agent 自动生成</p>
+</body></html>`;
+
+    try {
+      const converted = htmlDocx.asBlob(docHtml, { orientation: 'portrait', margins: { top: 720, right: 720, bottom: 720, left: 720 } });
+      const url = URL.createObjectURL(converted);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${productName}_竞品分析报告.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Word 导出失败:', err);
+      alert('导出失败，请稍后重试');
+    }
+  }
+
+  function exportMarkdown() {
+    const reportContent = getReportContent();
+    if (!reportContent) return;
+    const productName = getProductName();
+
+    // 构建 Markdown 文件内容
+    const mdContent = `# ${productName} 竞品分析报告\n\n${reportContent}\n\n---\n*由竞品分析 Agent 自动生成*`;
+
+    try {
+      const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${productName}_竞品分析报告.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Markdown 导出失败:', err);
+      alert('导出失败，请稍后重试');
+    }
+  }
+
+  function enableExport() {
+    const wordBtn = $('export-word-btn');
+    const mdBtn = $('export-md-btn');
+    if (wordBtn) wordBtn.disabled = false;
+    if (mdBtn) mdBtn.disabled = false;
   }
 
   // ====== 新建会话（返回主页）======
@@ -1537,6 +1917,8 @@
     // 显示欢迎页
     showWelcome();
     setStatus('ready');
+    $('export-word-btn').disabled = true;
+    $('export-md-btn').disabled = true;
   }
 
   // ====== 核心：发送消息 ======
@@ -1662,7 +2044,7 @@
 
       // 保存 bot 回复到消息列表
       currentMessages.push({ role: 'bot', content: fullText });
-      // 保存到历史（API 未返回 conversationId 时用本地临时 ID）
+      enableExport();
       if (conversationId) {
         saveToHistory(query, conversationId);
       } else {
@@ -1873,6 +2255,7 @@
         } else {
           currentMessages.push({ role: 'bot', content: fullText });
         }
+        enableExport();
         saveConversationMessages();
 
       } catch (err) {
